@@ -4,9 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Fotos por orden</title>
-  <!-- CONFIGURACIÓN PWA -->
+
+<!-- CONFIGURACIÓN PWA -->
 <meta name="theme-color" content="#0b62d6">
 <link rel="manifest" href="data:application/manifest+json;charset=utf-8,%7B%22name%22%3A%22Fotos%20por%20orden%22%2C%22short_name%22%3A%22FotosOrden%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%23f5f6f8%22%2C%22theme_color%22%3A%22%230b62d6%22%2C%22icons%22%3A%5B%5D%7D">
+
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--tx:#1b1f24;--mut:#69727d;--ac:#0b62d6;--acx:#fff;--bd:#d9dde3;--err:#c62828;--ok:#1b7f3b;
 box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -63,10 +65,8 @@ button:disabled{opacity:.45}
 
 <script>
 (function(){
-// CONFIGURACIÓN DE TU CORREO PREDETERMINADO:
-var CORREO_DESTINO = "zir-service-mmes@mediamarkt.es"; // <--- Pon aquí la dirección habitual
-
-var fotos=[]; // {blob, url}
+var CORREO_DESTINO = "zir-service-mmes@mediamarkt.es";
+var fotos=[];
 var $=function(i){return document.getElementById(i)};
 var cam=$('cam'),grid=$('grid'),msg=$('msg'),btn=$('enviar');
 
@@ -108,7 +108,6 @@ function pintar(){
 
 $('foto').onclick=function(){cam.click()};
 
-// ---- Configuración OCR (Tesseract.js) ----
 var camE=$('camE'),chips=$('chips'),ocr=null;
 function cargarOCR(){
   if(window.Tesseract)return Promise.resolve();
@@ -126,52 +125,36 @@ async function motor(){
   ocr=await Tesseract.createWorker('eng',1,{logger:function(m){
     if(m.status==='recognizing text')say('Leyendo etiqueta… '+Math.round(m.progress*100)+' %');
   }});
-  await ocr.setParameters({
-    tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-'
-  });
+  
+  // Quitamos la restricción rígida de whitelist para que lea con la flexibilidad de la 1ª versión
   return ocr;
-}
-
-function arreglarFormatoEtiqueta(x){
-  var p=x.toUpperCase().split('-');
-  if(p.length!==4||p[0].length!==4||p[1].length!==5||p[2].length!==1||p[3].length!==1)return null;
-  
-  var D={O:'0',Q:'0',D:'0',I:'1',L:'1',Z:'2',S:'5',G:'6',B:'8'};
-  var L={'0':'O','1':'I','2':'Z','5':'S','6':'G','8':'B'};
-  
-  function convD(s){return s.replace(/./g,function(c){return D[c]||c})}
-  function convL(s){return s.replace(/./g,function(c){return L[c]||c})}
-  
-  var b0 = convL(p[0][0]) + convD(p[0].slice(1));
-  var b1 = convD(p[1]);
-  var b2 = convL(p[2]);
-  var b3 = convL(p[3]);
-
-  return b0 + '-' + b1 + '-' + b2 + '-' + b3;
 }
 
 function candidatos(t){
   var out=[],seen={};
   function add(x){
-    if(x.length>=10 && !seen[x]){seen[x]=1;out.push(x)}
+    x = x.trim().toUpperCase();
+    if(x.length >= 8 && !seen[x]){
+      seen[x] = 1;
+      out.push(x);
+    }
   }
 
-  var patronExacto = t.match(/[A-Z0-9]{4}-[A-Z0-9]{5}-[A-Z0-9]-[A-Z0-9]/gi);
-  if(patronExacto){
-    patronExacto.forEach(function(raw){
-      var corregido = arreglarFormatoEtiqueta(raw);
-      if(corregido) add(corregido);
-    });
+  // Limpieza flexible igual que en la primera versión robusta
+  var limpio = t.replace(/[\r\n]+/g, ' ').replace(/[\s_\.,]+/g, '-');
+  var matches = limpio.match(/[A-Z0-9]+(?:-[A-Z0-9]+){2,}/gi);
+  if(matches){
+    matches.forEach(function(m){ add(m); });
   }
 
-  var secundario = (t.match(/[A-Z0-9\-]{10,}/gi)||[]);
-  secundario.forEach(function(x){
-    var corregido = arreglarFormatoEtiqueta(x);
-    if(corregido) add(corregido);
-    else if(x.includes('-')) add(x);
+  var palabras = limpio.split(/[^A-Z0-9\-]/);
+  palabras.forEach(function(p){
+    if(p.length >= 10 && /\d/.test(p) && /[A-Z]/.test(p)){
+      add(p);
+    }
   });
 
-  return out.slice(0,6);
+  return out.slice(0, 6);
 }
 
 $('leer').onclick=function(){camE.click()};
@@ -185,22 +168,26 @@ camE.onchange=async function(){
     if($('inc').checked){fotos.push({blob:b,url:URL.createObjectURL(b)});pintar()}
     var w=await Promise.race([motor(),new Promise(function(_,rej){setTimeout(function(){rej(new Error('tiempo agotado'))},30000)})]);
     var r=await w.recognize(b);
-    var c=candidatos(r.data.text||'');
+    
+    var textoLeido = r.data.text || '';
+    var c = candidatos(textoLeido);
     
     if(!c.length){
-      say('No se encontró el código de la etiqueta. Revisa el enfoque.','e');
+      say('No se encontró el código. Texto leído: "' + textoLeido.trim().substring(0, 30) + '..." Revisa el enfoque.','e');
       return;
     }
     
-    $('orden').value=c[0];
+    $('orden').value = c[0];
     c.forEach(function(x){
-      var q=document.createElement('button');q.className='chip';q.textContent=x;
-      q.onclick=function(){$('orden').value=x};
+      var q = document.createElement('button');
+      q.className = 'chip';
+      q.textContent = x;
+      q.onclick = function(){ $('orden').value = x; };
       chips.appendChild(q);
     });
-    say('Leído: '+c[0]+'. Compruébalo antes de enviar.','o');
+    say('Leído con éxito: ' + c[0] + '. Compruébalo antes de enviar.', 'o');
   }catch(e){
-    say('No se pudo usar el OCR ('+(e&&e.message?e.message:'error')+'). Escribe el número a mano.','e');
+    say('No se pudo usar el OCR (' + (e && e.message ? e.message : 'error') + '). Escribe el número a mano.', 'e');
   }
 };
 
