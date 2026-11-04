@@ -90,7 +90,6 @@ var cam=$('cam'),grid=$('grid'),msg=$('msg'),btn=$('enviar');
 function say(t,c){msg.textContent=t;msg.className=c||''}
 function orden(){return $('orden').value.trim().replace(/[\\\/:*?"<>|]+/g,'-')}
 
-// Recorte más ajustado de la franja superior (primer 45% de la imagen) para evitar ruido
 function recortarParteSuperior(file){
   return new Promise(function(res){
     var img=new Image(),u=URL.createObjectURL(file);
@@ -180,13 +179,11 @@ function candidatos(t){
 
   var limpio = t.replace(/[\r\n]+/g, ' ').replace(/[\s_\.,]+/g, '-');
   
-  // Búsqueda específica prioritaria para formatos tipo E259-80963-R-C
   var exactos = limpio.match(/[A-Z]\d{3,4}-\d{4,5}-[A-Z]-[A-Z0-9]/gi);
   if(exactos){
     exactos.forEach(function(m){ add(m); });
   }
 
-  // Búsqueda general secundaria por bloques de guiones
   var matches = limpio.match(/[A-Z0-9]+(?:-[A-Z0-9]+){2,}/gi);
   if(matches){
     matches.forEach(function(m){ add(m); });
@@ -210,7 +207,7 @@ camE.onchange=async function(){
       pintar();
     }
     
-    var w=await Promise.race([motor(),new Promise(function(_,rej){setTimeout(function(){rej(new Error('tiempo agotado'))},30000)})];
+    var w=await Promise.race([motor(),new Promise(function(_,rej){setTimeout(function(){rej(new Error('tiempo agotado'))},30000)})]);
     var r=await w.recognize(bOCR);
     
     var textoLeido = r.data.text || '';
