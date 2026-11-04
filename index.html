@@ -25,6 +25,20 @@ input[type=text]{width:100%;padding:12px;font-size:1rem;border:1px solid var(--b
 button{width:100%;padding:14px;font-size:1rem;font-weight:600;border:0;border-radius:10px;background:var(--ac);color:var(--acx);cursor:pointer}
 button.sec{background:transparent;color:var(--ac);border:1px solid var(--ac)}
 button:disabled{opacity:.45}
+
+/* Guía visual para centrar la etiqueta arriba */
+.scan-guide {
+  border: 2px dashed var(--ac);
+  background: rgba(11, 98, 214, 0.05);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+  margin-bottom: 10px;
+  font-size: 0.85rem;
+  color: var(--ac);
+  font-weight: 600;
+}
+
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
 .th{position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;border:1px solid var(--bd)}
 .th img{width:100%;height:100%;object-fit:cover;display:block}
@@ -45,8 +59,13 @@ button:disabled{opacity:.45}
 <div class="card">
 <label for="orden">Número de orden</label>
 <input id="orden" type="text" inputmode="text" autocomplete="off" placeholder="Ej.: E259-80639-R-C">
+
 <input id="camE" type="file" accept="image/*" capture="environment" hidden>
-<button id="leer" class="sec" style="margin-top:10px">Leer número de la etiqueta</button>
+
+<!-- Indicador visual para el usuario -->
+<div class="scan-guide">📌 Coloca el código de la etiqueta en la parte superior al fotografiar</div>
+
+<button id="leer" class="sec">Leer número de la etiqueta</button>
 <div class="chips" id="chips"></div>
 <label class="chk"><input id="inc" type="checkbox" checked> Incluir la foto de la etiqueta en el correo</label>
 </div>
@@ -72,6 +91,29 @@ var cam=$('cam'),grid=$('grid'),msg=$('msg'),btn=$('enviar');
 
 function say(t,c){msg.textContent=t;msg.className=c||''}
 function orden(){return $('orden').value.trim().replace(/[\\\/:*?"<>|]+/g,'-')}
+
+// Recorte optimizado de la zona superior (primer 55% de la foto)
+function recortarParteSuperior(file){
+  return new Promise(function(res){
+    var img=new Image(),u=URL.createObjectURL(file);
+    img.onload=function(){
+      var c=document.createElement('canvas');
+      var w=img.width, h=img.height;
+      var targetW = w;
+      var targetH = Math.round(h * 0.55);
+
+      c.width = targetW;
+      c.height = targetH;
+      var ctx=c.getContext('2d');
+      ctx.drawImage(img, 0, 0, targetW, targetH, 0, 0, targetW, targetH);
+      
+      URL.revokeObjectURL(u);
+      c.toBlob(function(b){res(b||file)},'image/jpeg',0.90);
+    };
+    img.onerror=function(){URL.revokeObjectURL(u);res(file)};
+    img.src=u;
+  });
+}
 
 function reducir(file){
   return new Promise(function(res){
@@ -123,10 +165,8 @@ async function motor(){
   if(ocr)return ocr;
   await cargarOCR();
   ocr=await Tesseract.createWorker('eng',1,{logger:function(m){
-    if(m.status==='recognizing text')say('Leyendo etiqueta… '+Math.round(m.progress*100)+' %');
+    if(m.status==='recognizing text')say('Leyendo parte superior… '+Math.round(m.progress*100)+' %');
   }});
-  
-  // Quitamos la restricción rígida de whitelist para que lea con la flexibilidad de la 1ª versión
   return ocr;
 }
 
@@ -140,7 +180,6 @@ function candidatos(t){
     }
   }
 
-  // Limpieza flexible igual que en la primera versión robusta
   var limpio = t.replace(/[\r\n]+/g, ' ').replace(/[\s_\.,]+/g, '-');
   var matches = limpio.match(/[A-Z0-9]+(?:-[A-Z0-9]+){2,}/gi);
   if(matches){
@@ -162,18 +201,24 @@ $('leer').onclick=function(){camE.click()};
 camE.onchange=async function(){
   var f=camE.files&&camE.files[0];camE.value='';
   if(!f)return;
-  chips.innerHTML='';say('Preparando OCR…');
+  chips.innerHTML='';say('Preparando lectura superior…');
   try{
-    var b=await reducir(f);
-    if($('inc').checked){fotos.push({blob:b,url:URL.createObjectURL(b)});pintar()}
+    var bOCR = await recortarParteSuperior(f);
+    
+    if($('inc').checked){
+      var bNormal = await reducir(f);
+      fotos.push({blob:bNormal,url:URL.createObjectURL(bNormal)});
+      pintar();
+    }
+    
     var w=await Promise.race([motor(),new Promise(function(_,rej){setTimeout(function(){rej(new Error('tiempo agotado'))},30000)})]);
-    var r=await w.recognize(b);
+    var r=await w.recognize(bOCR);
     
     var textoLeido = r.data.text || '';
     var c = candidatos(textoLeido);
     
     if(!c.length){
-      say('No se encontró el código. Texto leído: "' + textoLeido.trim().substring(0, 30) + '..." Revisa el enfoque.','e');
+      say('No se encontró el código arriba. Texto: "' + textoLeido.trim().substring(0, 30) + '..." Revisa el enfoque.','e');
       return;
     }
     
