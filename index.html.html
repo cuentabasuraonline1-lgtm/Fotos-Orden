@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fotos por orden</title>
+
+<!-- CONFIGURACIÓN PWA -->
+<meta name="theme-color" content="#0b62d6">
+<link rel="manifest" href="data:application/manifest+json;charset=utf-8,%7B%22name%22%3A%22Fotos%20por%20orden%22%2C%22short_name%22%3A%22FotosOrden%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%23f5f6f8%22%2C%22theme_color%22%3A%22%230b62d6%22%2C%22icons%22%3A%5B%5D%7D">
+
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--tx:#1b1f24;--mut:#69727d;--ac:#0b62d6;--acx:#fff;--bd:#d9dde3;--err:#c62828;--ok:#1b7f3b;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14171a;--card:#1f2428;--tx:#eceff2;--mut:#9aa4af;--ac:#5aa2ff;--acx:#08121f;--bd:#333a41;--err:#ff8a80;--ok:#6fd48c}}
+:root[data-theme="dark"]{--bg:#14171a;--card:#1f2428;--tx:#eceff2;--mut:#9aa4af;--ac:#5aa2ff;--acx:#08121f;--bd:#333a41;--err:#ff8a80;--ok:#6fd48c}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:520px;margin:0 auto;padding:16px}
+h1{font-size:1.25rem;margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
+label{display:block;font-weight:600;margin-bottom:6px}
+input[type=text]{width:100%;padding:12px;font-size:1rem;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx)}
+button{width:100%;padding:14px;font-size:1rem;font-weight:600;border:0;border-radius:10px;background:var(--ac);color:var(--acx);cursor:pointer}
+button.sec{background:transparent;color:var(--ac);border:1px solid var(--ac)}
+button:disabled{opacity:.45}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.th{position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;border:1px solid var(--bd)}
+.th img{width:100%;height:100%;object-fit:cover;display:block}
+.th b{position:absolute;top:4px;right:4px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;text-align:center;line-height:28px;font-size:18px;cursor:pointer}
+.row{display:flex;justify-content:space-between;align-items:center;margin-top:10px;color:var(--mut);font-size:.9rem}
+#msg{min-height:1.4em;margin-top:10px;font-weight:600}
+.e{color:var(--err)}.o{color:var(--ok)}
+.hint{color:var(--mut);font-size:.85rem;margin:10px 0 0}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{width:auto;padding:8px 12px;font-size:.9rem;background:var(--bg);color:var(--tx);border:1px solid var(--bd)}
+.chk{display:flex;gap:8px;align-items:center;font-weight:400;margin:10px 0 0;font-size:.9rem}
+</style>
+</head>
+<body>
+<main>
+<h1>📷 Fotos por orden</h1>
+
+<div class="card">
+<label for="orden">Número de orden</label>
+<input id="orden" type="text" inputmode="text" autocomplete="off" placeholder="Ej.: E259-80639-R-C">
+<input id="camE" type="file" accept="image/*" capture="environment" hidden>
+<button id="leer" class="sec" style="margin-top:10px">Leer número de la etiqueta</button>
+<div class="chips" id="chips"></div>
+<label class="chk"><input id="inc" type="checkbox" checked> Incluir la foto de la etiqueta en el correo</label>
+</div>
+
+<div class="card">
+<input id="cam" type="file" accept="image/*" capture="environment" hidden>
+<button id="foto">Hacer foto</button>
+<div class="row"><span id="cnt">0 fotos</span><span id="peso"></span></div>
+<div class="grid" id="grid"></div>
+</div>
+
+<button id="enviar" disabled>Enviar por correo</button>
+<div id="msg" role="status"></div>
+<p class="hint">El correo se enviará automáticamente a la dirección fijada con el número de orden y las fotos adjuntas.</p>
+</main>
+
+<script>
+(function(){
+// CONFIGURACIÓN DE TU CORREO PREDETERMINADO:
+var CORREO_DESTINO = "zir-service-mmes@mediamarkt.es";
+
+var fotos=[]; // {blob, url}
+var $=function(i){return document.getElementById(i)};
+var cam=$('cam'),grid=$('grid'),msg=$('msg'),btn=$('enviar');
+
+function say(t,c){msg.textContent=t;msg.className=c||''}
+function orden(){return $('orden').value.trim().replace(/[\\\/:*?"<>|]+/g,'-')}
+
+function reducir(file){
+  return new Promise(function(res){
+    var img=new Image(),u=URL.createObjectURL(file);
+    img.onload=function(){
+      var m=1600,k=Math.min(1,m/Math.max(img.width,img.height));
+      var c=document.createElement('canvas');
+      c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);
+      var ctx=c.getContext('2d');
+      ctx.drawImage(img,0,0,c.width,c.height);
+      URL.revokeObjectURL(u);
+      c.toBlob(function(b){res(b||file)},'image/jpeg',0.85);
+    };
+    img.onerror=function(){URL.revokeObjectURL(u);res(file)};
+    img.src=u;
+  });
+}
+
+function pintar(){
+  grid.innerHTML='';
+  var tot=0;
+  fotos.forEach(function(f,i){
+    tot+=f.blob.size;
+    var d=document.createElement('div');d.className='th';
+    var im=document.createElement('img');im.src=f.url;im.alt='Foto '+(i+1);
+    var x=document.createElement('b');x.textContent='×';x.setAttribute('aria-label','Quitar foto');
+    x.onclick=function(){URL.revokeObjectURL(f.url);fotos.splice(i,1);pintar()};
+    d.appendChild(im);d.appendChild(x);grid.appendChild(d);
+  });
+  $('cnt').textContent=fotos.length+(fotos.length===1?' foto':' fotos');
+  $('peso').textContent=fotos.length?(tot/1048576).toFixed(1)+' MB':'';
+  btn.disabled=!fotos.length;
+}
+
+$('foto').onclick=function(){cam.click()};
+
+// ---- Configuración OCR (Tesseract.js) ----
+var camE=$('camE'),chips=$('chips'),ocr=null;
+function cargarOCR(){
+  if(window.Tesseract)return Promise.resolve();
+  return new Promise(function(res,rej){
+    var s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+    s.onload=res;s.onerror=function(){rej(new Error('no se pudo cargar'))};
+    document.head.appendChild(s);
+  });
+}
+
+async function motor(){
+  if(ocr)return ocr;
+  await cargarOCR();
+  ocr=await Tesseract.createWorker('eng',1,{logger:function(m){
+    if(m.status==='recognizing text')say('Leyendo etiqueta… '+Math.round(m.progress*100)+' %');
+  }});
+  await ocr.setParameters({
+    tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-'
+  });
+  return ocr;
+}
+
+function candidatos(t){
+  var out=[],seen={};
+  function add(x){
+    x = x.trim().toUpperCase();
+    if(x.length >= 8 && !seen[x]){
+      seen[x] = 1;
+      out.push(x);
+    }
+  }
+
+  var limpio = t.replace(/[\r\n]+/g, ' ').replace(/[\s_\.,]+/g, '-');
+  var matches = limpio.match(/[A-Z0-9]+(?:-[A-Z0-9]+){2,}/gi);
+  if(matches){
+    matches.forEach(function(m){ add(m); });
+  }
+
+  var palabras = limpio.split(/[^A-Z0-9\-]/);
+  palabras.forEach(function(p){
+    if(p.length >= 10 && /\d/.test(p) && /[A-Z]/.test(p)){
+      add(p);
+    }
+  });
+
+  return out.slice(0, 6);
+}
+
+$('leer').onclick=function(){camE.click()};
+
+camE.onchange=async function(){
+  var f=camE.files&&camE.files[0];camE.value='';
+  if(!f)return;
+  chips.innerHTML='';say('Preparando OCR…');
+  try{
+    var b=await reducir(f);
+    if($('inc').checked){fotos.push({blob:b,url:URL.createObjectURL(b)});pintar()}
+    var w=await Promise.race([motor(),new Promise(function(_,rej){setTimeout(function(){rej(new Error('tiempo agotado'))},30000)})]);
+    var r=await w.recognize(b);
+    
+    var textoLeido = r.data.text || '';
+    var c = candidatos(textoLeido);
+    
+    if(!c.length){
+      say('No se encontró el código. Texto leído: "' + textoLeido.trim().substring(0, 30) + '..." Revisa el enfoque.','e');
+      return;
+    }
+    
+    $('orden').value = c[0];
+    c.forEach(function(x){
+      var q = document.createElement('button');
+      q.className = 'chip';
+      q.textContent = x;
+      q.onclick = function(){ $('orden').value = x; };
+      chips.appendChild(q);
+    });
+    say('Leído con éxito: ' + c[0] + '. Compruébalo antes de enviar.', 'o');
+  }catch(e){
+    say('No se pudo usar el OCR (' + (e && e.message ? e.message : 'error') + '). Escribe el número a mano.', 'e');
+  }
+};
+
+cam.onchange=async function(){
+  var f=cam.files&&cam.files[0];cam.value='';
+  if(!f)return;
+  say('Procesando foto…');
+  var b=await reducir(f);
+  fotos.push({blob:b,url:URL.createObjectURL(b)});
+  pintar();say('');
+};
+
+btn.onclick=async function(){
+  var o=orden();
+  if(!o){say('Escribe el número de orden.','e');$('orden').focus();return}
+  if(!fotos.length){say('Haz al menos una foto.','e');return}
+  
+  var files=fotos.map(function(f,i){
+    return new File([f.blob],o+'-'+(i+1)+'.jpg',{type:'image/jpeg'});
+  });
+  
+  var data={
+    files:files,
+    title: 'Orden ' + o,
+    text: 'Enviar a: ' + CORREO_DESTINO + '\n\nOrden ' + o + ' – ' + files.length + (files.length===1?' foto adjunta':' fotos adjuntas')
+  };
+  
+  try{
+    if(!navigator.canShare||!navigator.canShare({files:files})){
+      say('Este navegador no permite compartir fotos. Prueba con Chrome (Android) o Safari (iPhone).','e');return;
+    }
+    await navigator.share(data);
+    say('Compartido. Si ya enviaste el correo, puedes empezar otra orden.','o');
+    fotos.forEach(function(f){URL.revokeObjectURL(f.url)});
+    fotos=[];$('orden').value='';pintar();
+  }catch(e){
+    if(e&&e.name==='AbortError'){say('Envío cancelado.')}
+    else{say('No se pudo compartir: '+(e&&e.message?e.message:'error desconocido'),'e')}
+  }
+};
+pintar();
+})();
+</script>
+</body>
+</html>
