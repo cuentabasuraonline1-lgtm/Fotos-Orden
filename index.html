@@ -26,12 +26,11 @@ button{width:100%;padding:14px;font-size:1rem;font-weight:600;border:0;border-ra
 button.sec{background:transparent;color:var(--ac);border:1px solid var(--ac)}
 button:disabled{opacity:.45}
 
-/* Guía visual para centrar la etiqueta arriba */
 .scan-guide {
   border: 2px dashed var(--ac);
   background: rgba(11, 98, 214, 0.05);
   border-radius: 8px;
-  padding: 12px;
+  padding: 10px;
   text-align: center;
   margin-bottom: 10px;
   font-size: 0.85rem;
@@ -62,8 +61,7 @@ button:disabled{opacity:.45}
 
 <input id="camE" type="file" accept="image/*" capture="environment" hidden>
 
-<!-- Indicador visual para el usuario -->
-<div class="scan-guide">📌 Coloca el código de la etiqueta en la parte superior al fotografiar</div>
+<div class="scan-guide">📌 Centra solo el código superior de la etiqueta</div>
 
 <button id="leer" class="sec">Leer número de la etiqueta</button>
 <div class="chips" id="chips"></div>
@@ -92,7 +90,7 @@ var cam=$('cam'),grid=$('grid'),msg=$('msg'),btn=$('enviar');
 function say(t,c){msg.textContent=t;msg.className=c||''}
 function orden(){return $('orden').value.trim().replace(/[\\\/:*?"<>|]+/g,'-')}
 
-// Recorte optimizado de la zona superior (primer 55% de la foto)
+// Recorte más ajustado de la franja superior (primer 45% de la imagen) para evitar ruido
 function recortarParteSuperior(file){
   return new Promise(function(res){
     var img=new Image(),u=URL.createObjectURL(file);
@@ -100,7 +98,7 @@ function recortarParteSuperior(file){
       var c=document.createElement('canvas');
       var w=img.width, h=img.height;
       var targetW = w;
-      var targetH = Math.round(h * 0.55);
+      var targetH = Math.round(h * 0.45);
 
       c.width = targetW;
       c.height = targetH;
@@ -165,7 +163,7 @@ async function motor(){
   if(ocr)return ocr;
   await cargarOCR();
   ocr=await Tesseract.createWorker('eng',1,{logger:function(m){
-    if(m.status==='recognizing text')say('Leyendo parte superior… '+Math.round(m.progress*100)+' %');
+    if(m.status==='recognizing text')say('Leyendo código superior… '+Math.round(m.progress*100)+' %');
   }});
   return ocr;
 }
@@ -181,17 +179,18 @@ function candidatos(t){
   }
 
   var limpio = t.replace(/[\r\n]+/g, ' ').replace(/[\s_\.,]+/g, '-');
+  
+  // Búsqueda específica prioritaria para formatos tipo E259-80963-R-C
+  var exactos = limpio.match(/[A-Z]\d{3,4}-\d{4,5}-[A-Z]-[A-Z0-9]/gi);
+  if(exactos){
+    exactos.forEach(function(m){ add(m); });
+  }
+
+  // Búsqueda general secundaria por bloques de guiones
   var matches = limpio.match(/[A-Z0-9]+(?:-[A-Z0-9]+){2,}/gi);
   if(matches){
     matches.forEach(function(m){ add(m); });
   }
-
-  var palabras = limpio.split(/[^A-Z0-9\-]/);
-  palabras.forEach(function(p){
-    if(p.length >= 10 && /\d/.test(p) && /[A-Z]/.test(p)){
-      add(p);
-    }
-  });
 
   return out.slice(0, 6);
 }
@@ -201,7 +200,7 @@ $('leer').onclick=function(){camE.click()};
 camE.onchange=async function(){
   var f=camE.files&&camE.files[0];camE.value='';
   if(!f)return;
-  chips.innerHTML='';say('Preparando lectura superior…');
+  chips.innerHTML='';say('Preparando lectura…');
   try{
     var bOCR = await recortarParteSuperior(f);
     
@@ -211,14 +210,14 @@ camE.onchange=async function(){
       pintar();
     }
     
-    var w=await Promise.race([motor(),new Promise(function(_,rej){setTimeout(function(){rej(new Error('tiempo agotado'))},30000)})]);
+    var w=await Promise.race([motor(),new Promise(function(_,rej){setTimeout(function(){rej(new Error('tiempo agotado'))},30000)})];
     var r=await w.recognize(bOCR);
     
     var textoLeido = r.data.text || '';
     var c = candidatos(textoLeido);
     
     if(!c.length){
-      say('No se encontró el código arriba. Texto: "' + textoLeido.trim().substring(0, 30) + '..." Revisa el enfoque.','e');
+      say('No se encontró el código. Texto: "' + textoLeido.trim().substring(0, 30) + '..." Prueba a enfocar más cerca.','e');
       return;
     }
     
